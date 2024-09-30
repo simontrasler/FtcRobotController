@@ -4,7 +4,6 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
-import org.firstinspires.ftc.robotcore.external.tfod.Recognition;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 
 import java.util.List;
@@ -63,9 +62,7 @@ public abstract class AutonomousOpModeBase extends OpModeBase {
         cameraSwivelToCenter();
 
         // Go through the routine.
-        setCameraZoom(2.0);
         SpikeMark spikeMark = findSpikeMark();
-        setCameraZoom(1.0);
         placeSpikeMarkPixel(spikeMark);
         moveBackstage();
         findAprilTag(spikeMark);
@@ -91,33 +88,7 @@ public abstract class AutonomousOpModeBase extends OpModeBase {
         // assume it's on the center spike mark.
         ElapsedTime elapsedTime = new ElapsedTime();
 
-        while (opModeIsActive()) {
-            List<Recognition> recognitions = getRecognitions();
 
-            if (!recognitions.isEmpty()) {
-                // If we have multiple recognitions, hope it's the first one!
-                Recognition recognition = recognitions.get(0);
-                double angle = recognition.estimateAngleToObject(AngleUnit.RADIANS);
-
-                // We need to determine the randomization and remember it.
-                if (angle < -SIDE_SPIKE_MARK_ANGLE / 2.0) {
-                    spikeMark = SpikeMark.LEFT;
-                } else if (angle > SIDE_SPIKE_MARK_ANGLE / 2.0) {
-                    spikeMark = SpikeMark.RIGHT;
-                }
-
-                telemetry.addData("Spike Mark", "%s (angle %.2f)", spikeMark.toString(), angle);
-                telemetry.update();
-
-                break;
-            } else if (elapsedTime.seconds() >= TIMEOUT) {
-                // We don't have time to wait longer!
-                break;
-            }
-
-            // Share the CPU.
-            sleep(20);
-        }
 
         return spikeMark;
     }
@@ -145,12 +116,7 @@ public abstract class AutonomousOpModeBase extends OpModeBase {
             // Allow some time for the pixel to be detected.
             timer.reset();
             while (opModeIsActive() && timer.seconds() < 4.0) {
-                List<Recognition> recognitions = getRecognitions();
 
-                if (!recognitions.isEmpty()) {
-                    // We found something, it can only be a pixel (we hope).
-                    return spikeMark;
-                }
 
                 // Give the image recognition some time to work.
                 sleep(100);
@@ -177,34 +143,14 @@ public abstract class AutonomousOpModeBase extends OpModeBase {
 
         // Allow some time for a pixel to be detected.
         timer.reset();
-        while (opModeIsActive() && timer.seconds() < 4.0) {
-            List<Recognition> recognitions = getRecognitions();
 
-            if (!recognitions.isEmpty()) {
-                // We found something, it can only be a pixel (we hope).
-                return SpikeMark.LEFT;
-            }
-
-            // Give the image recognition some time to work.
-            sleep(100);
-        }
 
         // Look right.
         cameraSwivelToRight();
 
         // Allow some time for a pixel to be detected.
         timer.reset();
-        while (opModeIsActive() && timer.seconds() < 4.0) {
-            List<Recognition> recognitions = getRecognitions();
 
-            if (!recognitions.isEmpty()) {
-                // We found something, it can only be a pixel (we hope).
-                return SpikeMark.RIGHT;
-            }
-
-            // Give the image recognition some time to work.
-            sleep(100);
-        }
 
         // We did not find it, assume it is in the center.
         return SpikeMark.CENTER;

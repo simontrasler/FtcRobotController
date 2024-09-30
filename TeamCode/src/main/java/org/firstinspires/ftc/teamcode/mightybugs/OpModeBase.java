@@ -8,17 +8,15 @@ import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
-import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 import org.firstinspires.ftc.robotcore.external.hardware.camera.controls.ExposureControl;
 import org.firstinspires.ftc.robotcore.external.hardware.camera.controls.GainControl;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.AxesOrder;
 import org.firstinspires.ftc.robotcore.external.navigation.AxesReference;
-import org.firstinspires.ftc.robotcore.external.tfod.Recognition;
 import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
-import org.firstinspires.ftc.vision.tfod.TfodProcessor;
+import org.openftc.easyopencv.OpenCvWebcam;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -72,7 +70,7 @@ public abstract class OpModeBase extends LinearOpMode {
     /**
      * Objects for input/output.
      */
-    private TfodProcessor tfod;
+    private OpenCvWebcam webcam;
     private AprilTagProcessor aprilTag;
     private VisionPortal visionPortal;
     private IMU imu;
@@ -82,6 +80,8 @@ public abstract class OpModeBase extends LinearOpMode {
     private DcMotor frontRight;
     private DcMotor ladderLeft;
     private DcMotor ladderRight;
+    private DcMotor swivelLeft;
+    private DcMotor swivelRight;
     private Servo grabberLeft;
     private Servo grabberRight;
     private Servo grabberSwivel;
@@ -93,7 +93,6 @@ public abstract class OpModeBase extends LinearOpMode {
 
     protected void setup() {
         // Do the setup.
-        setupVisionPortal();
         setupImu();
         setupMotors();
         setupServos();
@@ -101,40 +100,6 @@ public abstract class OpModeBase extends LinearOpMode {
         // Acknowledge that the op mode is initialized.
         telemetry.addData("Mode", "%s ready", this.getClass().getSimpleName());
         telemetry.update();
-    }
-
-    private void setupVisionPortal() {
-        // Identify the camera.
-        WebcamName camera = hardwareMap.get(WebcamName.class, "Webcam 1");
-
-        // Create the TensorFlow processor.
-        tfod = new TfodProcessor.Builder()
-                .setModelFileName(TFOD_MODEL_FILE)
-                .setModelLabels(TFOD_MODEL_LABELS)
-                .build();
-
-        // Create the AprilTag processor.
-        aprilTag = new AprilTagProcessor.Builder()
-                .build();
-
-        // Adjust image decimation to trade-off detection-range for detection-rate.
-        // E.g., using a Logitech C920 WebCam:
-        //   1. Detect 2" Tag from 10 feet away at 10 Frames per second
-        //   2. Detect 2" Tag from 6  feet away at 22 Frames per second
-        //   3. Detect 2" Tag from 4  feet away at 30 Frames Per Second, or
-        //      detect 5" Tag from 10 feet away at 30 Frames Per Second
-        aprilTag.setDecimation(3);
-
-        // Create the vision portal by using a builder.
-        visionPortal = new VisionPortal.Builder()
-                .setCamera(camera)
-                .addProcessor(tfod)
-                .addProcessor(aprilTag)
-                .build();
-
-        // Adjustments to the TensorFlow processor.
-        tfod.setMinResultConfidence(0.5f);
-        tfod.setZoom(1.0);
     }
 
     private void setupMotors() {
@@ -229,6 +194,28 @@ public abstract class OpModeBase extends LinearOpMode {
         ladderRight.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
     }
 
+    private void setupSwivelMotors() {
+        // Identify the motors.
+        swivelLeft = hardwareMap.get(DcMotor.class, "swivelLeft");
+        swivelRight = hardwareMap.get(DcMotor.class, "swivelRight");
+
+        // Initialize the directions.
+        swivelLeft.setDirection(DcMotorSimple.Direction.REVERSE);
+        swivelRight.setDirection(DcMotorSimple.Direction.FORWARD);
+
+        // We do not want the ladder to fall down when not powered.
+        swivelLeft.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        swivelRight.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+
+        // Set the current encoder position to zero.
+        swivelLeft.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        swivelRight.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+
+        // Turn the motors on, by default ready for human control.
+        swivelLeft.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        swivelRight.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+    }
+
     private void setupServos() {
         setupGrabberServos();
         setupSwivelServos();
@@ -302,16 +289,12 @@ public abstract class OpModeBase extends LinearOpMode {
     }
 
     private void populateTelemetryVisionPortal() {
-        populateTelemetryTfod();
         populateTelemetryNewLine();
 
         populateTelemetryAprilTag();
         populateTelemetryNewLine();
     }
 
-    protected List<Recognition> getRecognitions() {
-        return tfod.getRecognitions();
-    }
 
     private void populateTelemetryMotion() {
         telemetry.addData("Motion", " ");
@@ -325,22 +308,6 @@ public abstract class OpModeBase extends LinearOpMode {
         telemetry.addData("Ladder", " ");
         telemetry.addData("- Left",   "Now %d, Target %d", ladderLeft.getCurrentPosition(),  ladderLeft.getTargetPosition());
         telemetry.addData("- Right",  "Now %d, Target %d", ladderRight.getCurrentPosition(), ladderRight.getTargetPosition());
-    }
-
-    private void populateTelemetryTfod() {
-        List<Recognition> currentRecognitions = getRecognitions();
-        telemetry.addData("# Objects Detected", currentRecognitions.size());
-
-        // Step through the list of recognitions and display info for each one.
-        for (Recognition recognition : currentRecognitions) {
-            double x = (recognition.getLeft() + recognition.getRight())  / 2.0;
-            double y = (recognition.getTop()  + recognition.getBottom()) / 2.0;
-
-            populateTelemetryNewLine();
-            telemetry.addData("Image", "%s (%.0f %% confidence)", recognition.getLabel(), recognition.getConfidence() * 100);
-            telemetry.addData("- Position", "%.0f / %.0f (angle %.2f)", x, y, recognition.estimateAngleToObject(AngleUnit.DEGREES));
-            telemetry.addData("- Size", "%.0f x %.0f", recognition.getWidth(), recognition.getHeight());
-        }
     }
 
     protected List<AprilTagDetection> getDetections() {
@@ -693,7 +660,4 @@ public abstract class OpModeBase extends LinearOpMode {
         }
     }
 
-    protected void setCameraZoom(double zoom) {
-        tfod.setZoom(zoom);
-    }
 }
