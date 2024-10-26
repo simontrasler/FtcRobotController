@@ -10,25 +10,16 @@ import java.util.List;
 
 public abstract class AutonomousOpModeBase extends OpModeBase {
     /**
-     * Constants for navigating to the spike marks.
-     * The midpoints of the left and right spike marks are roughly 12 inches
-     * to either side of the center line of the robot, and 6 inches closer
-     * than the midpoint of the center spike mark, which is roughly 47 inches
-     * away from the wall.
+     * Constants for navigating during autonomous
      */
-    private enum SpikeMark { LEFT, CENTER, RIGHT };
     private final double INITIAL_MOVEMENT_X = 6.0;
-    private final double SIDE_SPIKE_MARK_X = 41.0 - (ROBOT_LENGTH_INCHES / 2.0) - INITIAL_MOVEMENT_X;
-    private final double SIDE_SPIKE_MARK_Y = 12.0;
-    private final double SIDE_SPIKE_MARK_ANGLE = Math.atan2(SIDE_SPIKE_MARK_Y, SIDE_SPIKE_MARK_X);
-    private final double WALL_BUFFER = 4.0;
     private final double TIMEOUT = 10.0;
 
     /**
-     * Constants for navigating to the backstage.
-     */
-    private final double BACKSTAGE_BUFFER = 3.0;
-    private final double BACKDROP_BUFFER = 10.0;
+     * Constants for navigating
+     * Field and Robot constants
+     * */
+
     private final double TILE_LENGTH = 24.0;
 
     /**
@@ -51,12 +42,16 @@ public abstract class AutonomousOpModeBase extends OpModeBase {
         // Grip anything placed in the grabber.
         closeGrabber();
 
+        /*
+         * Insert function to raise the lifters to determined height
+         * Insert function to adjust Vertical Servo
+         * Insert function to adjust Horizontal Servos
+         * */
+
+
+
         // Make sure the swivel is in the correct position for driving.
         grabberSwivelToFloor();
-
-        // Nudge the ladder up off the floor, so the second pixel will be
-        // caught by the plow as we move forwards.
-        nudgeLadder();
 
         // Make sure the camera is looking forward.
         cameraSwivelToCenter();

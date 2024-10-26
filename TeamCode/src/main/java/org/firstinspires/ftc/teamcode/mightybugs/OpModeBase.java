@@ -8,26 +8,16 @@ import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
-import org.firstinspires.ftc.robotcore.external.hardware.camera.controls.ExposureControl;
-import org.firstinspires.ftc.robotcore.external.hardware.camera.controls.GainControl;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.AxesOrder;
 import org.firstinspires.ftc.robotcore.external.navigation.AxesReference;
-import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 import org.openftc.easyopencv.OpenCvWebcam;
 
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 public abstract class OpModeBase extends LinearOpMode {
-    /**
-     * Constants for the TensorFlow model.
-     */
-    private final String TFOD_MODEL_FILE = "CenterStage.tflite";
-    private final String[] TFOD_MODEL_LABELS = { "Pixel" };
-
     /**
      * Constants for controllability.
      * Smaller values are "slower", and 1.0 is "normal".
@@ -35,6 +25,7 @@ public abstract class OpModeBase extends LinearOpMode {
     protected final double DRIVE_GAIN = 0.5;
     protected final double TURN_GAIN  = 0.3;
     protected final double LADDER_GAIN = 0.5;
+    protected final double SWIVEL_GAIN = 0.3;
 
     /**
      * Dimensions of the robot.
@@ -45,14 +36,15 @@ public abstract class OpModeBase extends LinearOpMode {
     /**
      * Constants for encoder driving.
      */
-    private final double TICKS_PER_MOTOR_REV = 537.6;
+    private final double TICKS_PER_223_MOTOR_REV = 751.8;
+    private final double TICKS_PER_435_MOTOR_REV = 384.5;
     private final double TIMEOUT = 10.0;
 
     /**
      * Constants for wheels operation.
      */
     private final double WHEEL_DIAMETER_INCHES = 4.0;
-    private final double WHEEL_TICKS_PER_INCH = TICKS_PER_MOTOR_REV / WHEEL_DIAMETER_INCHES / Math.PI;
+    private final double WHEEL_TICKS_PER_INCH = TICKS_PER_223_MOTOR_REV / WHEEL_DIAMETER_INCHES / Math.PI;
     private final double FORWARDS_FUDGE_FACTOR = 12.0 / 11.0;
     private final double SIDEWAYS_FUDGE_FACTOR = 12.0 / 13.0;
 
@@ -60,19 +52,26 @@ public abstract class OpModeBase extends LinearOpMode {
      * Constants for ladder operation.
      */
     private final double SPOOL_DIAMETER_INCHES = 1.375;
-    private final double SPOOL_TICKS_PER_INCH = TICKS_PER_MOTOR_REV / SPOOL_DIAMETER_INCHES / Math.PI;
+    private final double SPOOL_TICKS_PER_INCH = TICKS_PER_223_MOTOR_REV / SPOOL_DIAMETER_INCHES / Math.PI;
     private final double LADDER_FUDGE_FACTOR = 12.0 / 12.5;
     private final double LADDER_MIN_HEIGHT_INCHES = 0.0;
-    private final double LADDER_STEP_HEIGHT_INCHES = 2.0;
-    private final double LADDER_SWIVEL_FLOOR_INCHES = 4.0;
     private final double LADDER_MAX_HEIGHT_INCHES = 28.0;
+    private final double LADDER_SLOW_ZONE_INCHES = 4.0;
+
+    /**
+     * Constants for swivel operation.
+     */
+    private final double SWIVEL_TICKS_PER_DEGREE = TICKS_PER_435_MOTOR_REV / 360.0;
+    private final double SWIVEL_FUDGE_FACTOR = 1.0;
+    private final double SWIVEL_MIN_ANGLE = 0.0;
+    private final double SWIVEL_MID_ANGLE = 45.0;
+    private final double SWIVEL_MAX_ANGLE = 90.0;
 
     /**
      * Objects for input/output.
      */
     private OpenCvWebcam webcam;
     private AprilTagProcessor aprilTag;
-    private VisionPortal visionPortal;
     private IMU imu;
     private DcMotor backLeft;
     private DcMotor frontLeft;
@@ -84,8 +83,9 @@ public abstract class OpModeBase extends LinearOpMode {
     private DcMotor swivelRight;
     private Servo grabberLeft;
     private Servo grabberRight;
-    private Servo grabberSwivel;
-    private Servo cameraSwivel;
+    private Servo xRotatorLeft;
+    private Servo xRotatorRight;
+    private Servo zRotator;
 
     /**
      * Setup functions.
@@ -96,6 +96,7 @@ public abstract class OpModeBase extends LinearOpMode {
         setupImu();
         setupMotors();
         setupServos();
+        setupCamera();
 
         // Acknowledge that the op mode is initialized.
         telemetry.addData("Mode", "%s ready", this.getClass().getSimpleName());
@@ -105,6 +106,7 @@ public abstract class OpModeBase extends LinearOpMode {
     private void setupMotors() {
         setupWheelMotors();
         setupLadderMotors();
+        setupSwivelMotors();
     }
 
     private void setupImu() {
@@ -131,10 +133,10 @@ public abstract class OpModeBase extends LinearOpMode {
         // Initialize directions. The "forward" direction is clockwise,
         // looking from the motor body so the motors on the right side must run
         // in reverse.
-        backLeft.setDirection(DcMotor.Direction.FORWARD);
-        frontLeft.setDirection(DcMotor.Direction.FORWARD);
-        backRight.setDirection(DcMotor.Direction.REVERSE);
-        frontRight.setDirection(DcMotor.Direction.REVERSE);
+        backLeft.setDirection(DcMotor.Direction.REVERSE);
+        frontLeft.setDirection(DcMotor.Direction.REVERSE);
+        backRight.setDirection(DcMotor.Direction.FORWARD);
+        frontRight.setDirection(DcMotor.Direction.FORWARD);
     }
 
     protected void setupWheelsWithoutEncoders() {
@@ -211,14 +213,14 @@ public abstract class OpModeBase extends LinearOpMode {
         swivelLeft.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         swivelRight.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
 
-        // Turn the motors on, by default ready for human control.
-        swivelLeft.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-        swivelRight.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        // Set the motors to use encoders for moving to set positions.
+        swivelLeft.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        swivelRight.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
     }
 
     private void setupServos() {
         setupGrabberServos();
-        setupSwivelServos();
+        setupRotatorServos();
     }
 
     private void setupGrabberServos() {
@@ -237,20 +239,27 @@ public abstract class OpModeBase extends LinearOpMode {
         grabberRight.scaleRange(0.62, 0.82);
     }
 
-    private void setupSwivelServos() {
+    private void setupRotatorServos() {
         // Identify the swivel servo. Do not set the starting positions, so
         // the team can position them as needed.
-        grabberSwivel = hardwareMap.get(Servo.class, "grabberSwivel");
-        cameraSwivel  = hardwareMap.get(Servo.class, "cameraSwivel");
+        xRotatorLeft  = hardwareMap.get(Servo.class, "xRotatorLeft");
+        xRotatorRight = hardwareMap.get(Servo.class, "xRotatorRight");
+        zRotator = hardwareMap.get(Servo.class, "zRotator");
 
         // Initialize direction.
-        grabberSwivel.setDirection(Servo.Direction.REVERSE);
-        cameraSwivel.setDirection(Servo.Direction.FORWARD);
+        xRotatorLeft.setDirection(Servo.Direction.REVERSE);
+        xRotatorRight.setDirection(Servo.Direction.FORWARD);
+        zRotator.setDirection(Servo.Direction.FORWARD);
 
         // Initialize the range of motion. Note this is always calibrated on
         // the "forward" direction of the servo.
-        grabberSwivel.scaleRange(0.28, 0.68);
-        cameraSwivel.scaleRange(0.35, 0.6);
+        xRotatorLeft.scaleRange(0.28, 0.68);
+        xRotatorRight.scaleRange(0.28, 0.68);
+        zRotator.scaleRange(0.35, 0.6);
+    }
+
+    private void setupCamera() {
+
     }
 
     /**
@@ -261,15 +270,12 @@ public abstract class OpModeBase extends LinearOpMode {
         // Stop the wheels.
         setWheelPower(0.0, 0.0, 0.0, 0.0);
 
-        // Adjust the swivel so the grabber can descend safely.
-        grabberSwivelToFloor();
+        // Adjust the swivel to make it easy to carry the robot.
+        alignToRestPosition();
 
         // Stop the ladder.
         ladderLeft.setPower(0.0);
         ladderRight.setPower(0.0);
-
-        // Save CPU resources when camera is no longer needed.
-        visionPortal.close();
 
         // Acknowledge that the op mode is completed.
         telemetry.addData("Mode", "%s finished", this.getClass().getSimpleName());
@@ -289,12 +295,9 @@ public abstract class OpModeBase extends LinearOpMode {
     }
 
     private void populateTelemetryVisionPortal() {
-        populateTelemetryNewLine();
-
         populateTelemetryAprilTag();
         populateTelemetryNewLine();
     }
-
 
     private void populateTelemetryMotion() {
         telemetry.addData("Motion", " ");
@@ -308,6 +311,12 @@ public abstract class OpModeBase extends LinearOpMode {
         telemetry.addData("Ladder", " ");
         telemetry.addData("- Left",   "Now %d, Target %d", ladderLeft.getCurrentPosition(),  ladderLeft.getTargetPosition());
         telemetry.addData("- Right",  "Now %d, Target %d", ladderRight.getCurrentPosition(), ladderRight.getTargetPosition());
+    }
+
+    private void populateTelemetrySwivel() {
+        telemetry.addData("Swivel", " ");
+        telemetry.addData("- Left",   "Now %d, Target %d", swivelLeft.getCurrentPosition(),  swivelLeft.getTargetPosition());
+        telemetry.addData("- Right",  "Now %d, Target %d", swivelRight.getCurrentPosition(), swivelRight.getTargetPosition());
     }
 
     protected List<AprilTagDetection> getDetections() {
@@ -336,8 +345,9 @@ public abstract class OpModeBase extends LinearOpMode {
 
     private void populateTelemetryServos() {
         telemetry.addData("Grabber", "Left %.2f, Right %.2f", grabberLeft.getPosition(), grabberRight.getPosition());
-        telemetry.addData("Grabber swivel", "At %.2f", grabberSwivel.getPosition());
-        telemetry.addData("Camera swivel", "At %.2f", cameraSwivel.getPosition());
+        telemetry.addData("X rotator swivel left", "At %.2f", xRotatorLeft.getPosition());
+        telemetry.addData("X rotator swivel right", "At %.2f", xRotatorRight.getPosition());
+        telemetry.addData("Z rotator swivel", "At %.2f", zRotator.getPosition());
     }
 
     private void populateTelemetryNewLine() {
@@ -460,10 +470,10 @@ public abstract class OpModeBase extends LinearOpMode {
         }
 
         // Calculate wheel powers.
-        double frontLeftPower  = drive + strafe - yaw;
-        double frontRightPower = drive - strafe + yaw;
-        double backLeftPower   = drive - strafe - yaw;
-        double backRightPower  = drive + strafe + yaw;
+        double frontLeftPower  = drive - strafe - yaw;
+        double frontRightPower = drive + strafe + yaw;
+        double backLeftPower   = drive + strafe - yaw;
+        double backRightPower  = drive - strafe + yaw;
 
         // Get the strongest of all the wheel powers...
         double max = Math.max(Math.abs(frontLeftPower), Math.abs(frontRightPower));
@@ -509,33 +519,44 @@ public abstract class OpModeBase extends LinearOpMode {
         grabberRight.setPosition(Servo.MIN_POSITION);
     }
 
+    protected void pointGrabberDown() {
+        xRotatorLeft.setPosition(Servo.MIN_POSITION);
+        xRotatorRight.setPosition(Servo.MIN_POSITION);
+    }
+
+    protected void pointGrabberUp() {
+        xRotatorLeft.setPosition(Servo.MAX_POSITION);
+        xRotatorRight.setPosition(Servo.MAX_POSITION);
+    }
+
     /**
      * Swivel functions.
      */
+    protected void alignToFloor() {
+        // Set the X rotator servos to point down.
+        pointGrabberDown();
 
-    protected void grabberSwivelToFloor() {
-        grabberSwivel.setPosition(Servo.MIN_POSITION);
+        // Open grabber.
+        openGrabber();
+
+        // Swivel the arm down.
+        moveSwivelByAngle(SWIVEL_MIN_ANGLE, TIMEOUT);
     }
 
-    protected void grabberSwivelToBackdrop() {
-        if (ladderRight.getCurrentPosition() < LADDER_SWIVEL_FLOOR_INCHES * SPOOL_TICKS_PER_INCH * LADDER_FUDGE_FACTOR) {
-            // The ladder is in the lowered position. The swivel would catch
-            // on the chassis, so do not allow the movement.
-            return;
-        }
-        grabberSwivel.setPosition(Servo.MAX_POSITION);
+    protected void alignToWall() {
+        // Set the X rotator servos to point at the wall.
+        pointGrabberUp();
+
+        // Swivel the arm up, to point at the wall.
+        moveSwivelByAngle(SWIVEL_MID_ANGLE, TIMEOUT);
     }
 
-    protected void cameraSwivelToLeft() {
-        cameraSwivel.setPosition(Servo.MIN_POSITION);
-    }
+    protected void alignToRestPosition() {
+        // Set the X rotator servos to point down.
+        pointGrabberDown();
 
-    protected void cameraSwivelToCenter() {
-        cameraSwivel.setPosition(0.5);
-    }
-
-    protected void cameraSwivelToRight() {
-        cameraSwivel.setPosition(Servo.MAX_POSITION);
+        // Swivel the arm up, to the rest position.
+        moveSwivelByAngle(SWIVEL_MAX_ANGLE, TIMEOUT);
     }
 
     /**
@@ -557,13 +578,6 @@ public abstract class OpModeBase extends LinearOpMode {
 
         // Move to set positions, not relative to where we are starting from.
         int target = (int)(targetPosition * SPOOL_TICKS_PER_INCH * LADDER_FUDGE_FACTOR);
-
-        if (target < ladderRight.getCurrentPosition()) {
-            // We are lowering the ladder, so make sure the swivel is in the
-            // correct position. The ladders are locked together, so we can
-            // take the current position from either one.
-            grabberSwivelToFloor();
-        }
 
         ladderLeft.setTargetPosition(target);
         ladderRight.setTargetPosition(target);
@@ -588,9 +602,6 @@ public abstract class OpModeBase extends LinearOpMode {
         ladderLeft.setPower(0.0);
         ladderRight.setPower(0.0);
 
-        ladderLeft.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-        ladderRight.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-
         telemetry.addData("Ladder", "Left %d, Right %d", ladderLeft.getCurrentPosition(), ladderRight.getCurrentPosition());
     }
 
@@ -604,15 +615,14 @@ public abstract class OpModeBase extends LinearOpMode {
 
         double inches = ladderRight.getCurrentPosition() / SPOOL_TICKS_PER_INCH / LADDER_FUDGE_FACTOR;
 
-        if (inches >= LADDER_MAX_HEIGHT_INCHES) {
-            // Do not allow the ladder to go beyond the maximum height.
-            if (power > 0.0) {
-                power = 0.0;
-            }
+        if (power > 0.0) {
+            // We are extending. Reduce power as the ladder approaches the
+            // maximum position.
+            power = Math.min(power, (LADDER_MAX_HEIGHT_INCHES - inches) / LADDER_SLOW_ZONE_INCHES);
         } else if (power < 0.0) {
-            // We are descending. Reduce power as the ladder approaches the
+            // We are retracting. Reduce power as the ladder approaches the
             // minimum position.
-            power = Math.min(power, inches / LADDER_SWIVEL_FLOOR_INCHES);
+            power = Math.min(power, inches / LADDER_SLOW_ZONE_INCHES);
         }
 
         ladderLeft.setPower(power);
@@ -623,41 +633,53 @@ public abstract class OpModeBase extends LinearOpMode {
         moveLadderByDistance(LADDER_MIN_HEIGHT_INCHES, TIMEOUT);
     }
 
-    protected void nudgeLadder() {
-        moveLadderByDistance(LADDER_STEP_HEIGHT_INCHES, TIMEOUT);
-    }
-
     protected void raiseLadder() {
         moveLadderByDistance(LADDER_MAX_HEIGHT_INCHES, TIMEOUT);
     }
 
     /**
-     * Camera functions.
+     * Ladder Swivel functions
      */
 
-    protected void setManualExposure(int exposureMillis, int gain) {
-        // Make sure camera is streaming before we try to set the exposure controls.
-        if (visionPortal.getCameraState() != VisionPortal.CameraState.STREAMING) {
-            while (opModeIsActive() && visionPortal.getCameraState() != VisionPortal.CameraState.STREAMING) {
-                sleep(20);
-            }
+    /**
+     * Move the swivel to set positions.
+     *
+     * @param targetAngle The target angle
+     * @param timeout The maximum amount of time to move, for safety reasons
+     */
+    protected void moveSwivelByAngle(double targetAngle, double timeout) {
+        ElapsedTime elapsedTime = new ElapsedTime();
+
+        // Stop the ladder, so we can measure its current position.
+        swivelLeft.setPower(0.0);
+        swivelRight.setPower(0.0);
+
+        // Move to set positions, not relative to where we are starting from.
+        int target = (int)(targetAngle * SWIVEL_TICKS_PER_DEGREE * SWIVEL_FUDGE_FACTOR);
+
+        swivelLeft.setTargetPosition(target);
+        swivelRight.setTargetPosition(target);
+
+        swivelLeft.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        swivelRight.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+
+        // We are ready, so reset the timer and start motion.
+        elapsedTime.reset();
+        swivelLeft.setPower(SWIVEL_GAIN);
+        swivelRight.setPower(SWIVEL_GAIN);
+
+        while (opModeIsActive() && (elapsedTime.seconds() < timeout) && swivelLeft.isBusy() && swivelRight.isBusy()) {
+            // Keep looping while we wait.
+            populateTelemetrySwivel();
+            telemetry.update();
+
+            // Share the CPU.
+            sleep(5);
         }
 
-        // Set camera controls unless we are stopping.
-        if (opModeIsActive()) {
-            ExposureControl exposureControl = visionPortal.getCameraControl(ExposureControl.class);
-            if (exposureControl.getMode() != ExposureControl.Mode.Manual) {
-                exposureControl.setMode(ExposureControl.Mode.Manual);
-                sleep(50);
-            }
+        swivelLeft.setPower(0.0);
+        swivelRight.setPower(0.0);
 
-            exposureControl.setExposure((long) exposureMillis, TimeUnit.MILLISECONDS);
-            sleep(20);
-
-            GainControl gainControl = visionPortal.getCameraControl(GainControl.class);
-            gainControl.setGain(gain);
-            sleep(20);
-        }
+        telemetry.addData("Swivel", "Left %d, Right %d", swivelLeft.getCurrentPosition(), swivelRight.getCurrentPosition());
     }
-
 }
